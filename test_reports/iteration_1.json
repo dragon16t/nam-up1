@@ -1,0 +1,46 @@
+{
+  "summary": "Tested NAMCOS Phase 1 money core (backend + frontend). Backend: all 5 wallet/payment/order endpoints pass (customer OTP login, GET /api/wallet/balance, pay-with-wallet success + INSUFFICIENT short-fall path, order detail, wallet transactions with store name). Direct DB verification confirmed payment record has customer_name & customer_phone (merchant table source). Frontend: shortfall modal renders correctly with Bill/Balance/To-add amounts, wallet history shows Green Mart debit of ₹120, balance correctly reflects ₹380 after wallet pay. Did NOT trigger real Razorpay checkout (LIVE keys).",
+  "backend_issues": {
+    "critical": [],
+    "minor": [
+      {"endpoint": "/api/payments/pay-with-wallet", "issue": "Uses magic-string error pattern 'INSUFFICIENT|balance|shortfall' as 400 detail — fragile contract between FE/BE. Prefer structured JSON (e.g. {code:'INSUFFICIENT_FUNDS', balance, shortfall})."},
+      {"endpoint": "/api/payments/pay-with-wallet", "issue": "Wallet deduction uses $inc without a conditional balance guard inside the update; two concurrent requests could race past the pre-read balance check and overdraw. Use findOneAndUpdate with filter {user_id, balance: {$gte: amount}}."},
+      {"endpoint": "/api/merchant/payments", "issue": "All seeded stores have owner_id='demo' which is not a real user, so no merchant can see payments end-to-end via OTP login. Cannot run live merchant UI check for /merchant/payments without creating a real merchant user that owns at least one store."}
+    ]
+  },
+  "frontend_issues": {
+    "ui_bugs": [
+      {"component": "StoreDetail.jsx (customer store page)", "issue": "The fixed 'Call Store Support' CTA at bottom-20 (<div className=\"fixed bottom-20 left-0 right-0 ... pointer-events-none\"> with pointer-events-auto on inner full-width child) overlays and intercepts taps on the Payment Method tiles (Wallet in particular) and the Pay button on 390px mobile viewport. Real-user Playwright click on [data-testid='pay-method-wallet'] and [data-testid='pay-now-btn'] was blocked until we removed/scrolled past the overlay. Fix: either make the inner CTA width-fit (not left:0 right:0), or add bottom padding to the pay card so it sits above the sticky CTA, or raise sticky CTA z-index with its own clickable hit area only.", "selector": "[data-testid='pay-method-wallet'], [data-testid='pay-now-btn']", "priority": "HIGH"}
+    ],
+    "integration_issues": [],
+    "design_issues": [
+      {"screen": "Order Detail / Store Detail success card", "issues": ["payMethod capitalize shows 'Wallet' or 'Upi'; 'Upi' should be 'UPI' (uppercase acronym)."]}
+    ]
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_namcos_phase1.py",
+    "/app/test_reports/pytest/phase1_results.xml"
+  ],
+  "action_items": [
+    "Fix overlay bug: the 'Call Store Support' sticky bar on StoreDetail is covering the Payment Method tiles & Pay button area on mobile — users on small viewports may be unable to tap Wallet / Pay.",
+    "Make pay-with-wallet wallet deduction race-safe (atomic conditional update) and return structured error JSON instead of 'INSUFFICIENT|..|..' string.",
+    "Seed at least one real merchant user owning a store so merchant portal flows (login + /merchant/payments customer column) can be verified end-to-end."
+  ],
+  "critical_code_review_comments": [
+    "payments.py pay_with_wallet: non-atomic balance check + $inc deduct. Replace with wallet.find_one_and_update({user_id, balance: {$gte: amount}}, {$inc: {balance: -amount}}) and treat None as insufficient.",
+    "payments.py: raising HTTPException(400, 'INSUFFICIENT|...') leaks a parsing contract via the error message. Return a proper JSON body with code+amounts.",
+    "StoreDetail.jsx: sticky Call CTA uses pointer-events-none outer + pointer-events-auto full-width inner, which still blocks taps on anything underneath across the full page width. Shrink the clickable area to w-max mx-auto, or add pb to Pay card so content isn't under it.",
+    "payments.py order_detail / orders.py: ensure /api/orders/{id} returns paid_via='wallet' consistently (confirmed via test).",
+    "common.py get_wallet_balance: good — reads real wallet doc, returns 0 default (no hardcoding)."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_namcos_phase1.py (new pytest suite for Phase 1)"
+  ],
+  "success_rate": {"backend": "100% (5/5 executed, 1 skipped due to no real merchant user)", "frontend": "90% (shortfall modal + wallet history + balance all verified; merchant UI column not verified due to no real merchant user)"},
+  "test_credentials": "Customer phone +919000000055, OTP returned in /api/auth/send-otp dev response.",
+  "seed_data_creation": "Seeded /test_database db.wallet upsert {user_id: <customer id for +919000000055>, balance: 500}. Current customer wallet balance after tests: ₹380 (after one ₹120 debit to Green Mart).",
+  "retest_needed": true,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "Backend fully covered by /app/backend/tests/test_namcos_phase1.py. Test customer phone +919000000055 has wallet balance 380 with one captured wallet payment to Green Mart (store_id visible in db.stores first doc). All stores are owned by 'demo' (fake user) — merchant portal /merchant/payments UI verification requires creating a real merchant that owns a store. Razorpay keys are LIVE, DO NOT complete any UPI/card checkout.",
+  "rca_of_overlay_bug": "StoreDetail.jsx lines 258-267: `<div className='fixed bottom-20 left-0 right-0 px-4 z-30 pointer-events-none'><div className='pointer-events-auto max-w-[480px] mx-auto'>...</div></div>`. On a 390px mobile viewport the inner div's max-w-[480px] equals full width, so the entire horizontal strip at bottom-20 captures pointer events and blocks any pay-method tile or pay button that scrolls under it. Reproduction: /customer/store/<id>, enter amount, tap 'Wallet' tile — nothing selects. Mitigation: use `w-fit mx-auto` on inner, OR add `pb-32` to the Pay card container so it never sits below the CTA strip."
+}

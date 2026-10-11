@@ -343,6 +343,30 @@ async def seed_data():
         })
         logger.info("Default banner seeded")
 
+    # Seed a demo merchant that owns the demo listings (so merchant portal works e2e)
+    merchant_phone = "+919876543210"
+    merch = await db.users.find_one({"phone": merchant_phone})
+    if not merch:
+        res = await db.users.insert_one({
+            "phone": merchant_phone, "name": "Rajesh Kumar",
+            "profile_photo": None, "roles": ["customer", "merchant"], "is_active": True,
+            "created_at": datetime.now(timezone.utc).isoformat()})
+        merch_id = str(res.inserted_id)
+    else:
+        merch_id = str(merch["_id"])
+        if "merchant" not in merch.get("roles", []):
+            await db.users.update_one({"_id": merch["_id"]}, {"$addToSet": {"roles": "merchant"}})
+    # Reassign demo-owned listings & payments to the real merchant
+    for col, fields in [
+        (db.stores, ["owner_id"]), (db.products, ["merchant_id"]),
+        (db.agriculture, ["seller_id"]), (db.services, ["provider_id"]),
+        (db.classifieds, ["seller_id"]),
+        (db.orders, ["merchant_id"]), (db.payments, ["merchant_id"]),
+        (db.settlements, ["merchant_id"]),
+    ]:
+        for f in fields:
+            await col.update_many({f: "demo"}, {"$set": {f: merch_id}})
+
     # Write test credentials
     creds = Path("/app/memory/test_credentials.md")
     creds.parent.mkdir(exist_ok=True)
@@ -358,6 +382,11 @@ async def seed_data():
 - Login via Phone OTP at /auth
 - OTP is returned in API response (dev mode — no SMS provider yet)
 - Any Indian mobile number works: e.g. +919876543210
+
+## Demo Merchant (owns all demo listings & payments)
+- Phone: +919876543210  (Name: Rajesh Kumar, roles: customer + merchant)
+- Login via Phone OTP at /auth, then open the Merchant portal
+- Sees demo stores, orders, payments (with customer phone) and balance
 
 ## Auth Endpoints
 - POST /api/auth/send-otp  → {{phone: "+91XXXXXXXXXX"}}

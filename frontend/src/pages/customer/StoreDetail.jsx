@@ -66,10 +66,9 @@ export default function StoreDetail() {
     try {
       await completeWalletPay(amt);
     } catch (e) {
-      const detail = e?.response?.data?.detail || '';
-      if (typeof detail === 'string' && detail.startsWith('INSUFFICIENT|')) {
-        const [, bal, shortfall] = detail.split('|');
-        setWalletPrompt({ balance: parseFloat(bal), shortfall: parseFloat(shortfall), amount: amt });
+      const detail = e?.response?.data?.detail;
+      if (detail && detail.code === 'INSUFFICIENT_FUNDS') {
+        setWalletPrompt({ balance: detail.balance, shortfall: detail.shortfall, amount: amt });
       } else {
         toast.error(formatApiError(e));
       }
@@ -135,7 +134,7 @@ export default function StoreDetail() {
               <div className="flex justify-between text-sm"><span className="text-slate-500">Paid to</span><span className="font-semibold text-slate-800">{success.store_name}</span></div>
               <div className="flex justify-between text-sm"><span className="text-slate-500">Transaction ID</span><span className="font-mono text-xs text-slate-600">{success.transaction_id}</span></div>
               <div className="flex justify-between text-sm"><span className="text-slate-500">Date & Time</span><span className="text-slate-600">{formatDateTime(success.paid_at)}</span></div>
-              <div className="flex justify-between text-sm"><span className="text-slate-500">Mode</span><span className="text-slate-600 capitalize">{payMethod}</span></div>
+              <div className="flex justify-between text-sm"><span className="text-slate-500">Mode</span><span className="text-slate-600 capitalize">{payMethod === 'upi' ? 'UPI / QR' : payMethod}</span></div>
             </div>
             <div className="px-5 pb-5 space-y-2">
               <Button onClick={() => { setSuccess(null); setAmount(''); setNotes(''); }}
@@ -254,16 +253,14 @@ export default function StoreDetail() {
         </Button>
       </div>
 
-      {/* Sticky Call CTA (support routed) */}
-      <div className="fixed bottom-20 left-0 right-0 px-4 z-30 pointer-events-none">
-        <div className="pointer-events-auto max-w-[480px] mx-auto">
-          <a href={supportPhone ? `tel:${supportPhone}` : undefined}
-            data-testid="store-call-btn"
-            onClick={e => { if (!supportPhone) { e.preventDefault(); toast.info('Support number will be shown here'); } }}
-            className="flex items-center justify-center gap-2 w-full h-12 bg-white border border-slate-200 text-[#0F4C3A] font-bold text-sm rounded-2xl shadow-md active:scale-[0.99] transition-all">
-            <Phone className="w-4 h-4" /> Call Store Support
-          </a>
-        </div>
+      {/* Call Store Support (inline, no overlay) */}
+      <div className="mx-4 mb-4">
+        <a href={supportPhone ? `tel:${supportPhone}` : undefined}
+          data-testid="store-call-btn"
+          onClick={e => { if (!supportPhone) { e.preventDefault(); toast.info('Support number will be shown here'); } }}
+          className="flex items-center justify-center gap-2 w-full h-12 bg-white border border-slate-200 text-[#0F4C3A] font-bold text-sm rounded-2xl shadow-sm active:scale-[0.99] transition-all">
+          <Phone className="w-4 h-4" /> Call Store Support
+        </a>
       </div>
       {/* Wallet shortfall prompt */}
       {walletPrompt && (

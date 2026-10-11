@@ -1,6 +1,7 @@
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel
 from bson import ObjectId
+from pymongo import ReturnDocument
 from datetime import datetime, timezone
 from typing import Optional
 import logging, random, time
@@ -335,11 +336,18 @@ async def pay_with_wallet(req: PayWithWalletRequest, request: Request):
     if not store:
         raise HTTPException(404, "Store not found")
 
-    wallet = await db.wallet.find_one({"user_id": user["id"]})
-    balance = (wallet or {}).get("balance", 0.0)
-    if balance < req.amount:
-        shortfall = round(req.amount - balance, 2)
-        raise HTTPException(400, f"INSUFFICIENT|{balance}|{shortfall}")
+    # Atomic conditional deduction to avoid race/overdraft
+    updated = await db.wallet.find_one_and_update(
+        {"user_id": user["id"], "balance": {"$gte": req.amount}},
+        {"$inc": {"balance": -req.amount}},
+        return_document=ReturnDocument.AFTER,
+    )
+    if not updated:
+        wallet = await db.wallet.find_one({"user_id": user["id"]})
+        balance = round((wallet or {}).get("balance", 0.0), 2)
+        raise HTTPException(400, {"code": "INSUFFICIENT_FUNDS", "balance": balance,
+                                  "shortfall": round(req.amount - balance, 2)})
+    new_balance = round(updated["balance"], 2)
 
     now = datetime.now(timezone.utc).isoformat()
     order_number = f"ORD{int(time.time())}{random.randint(100, 999)}"
@@ -357,9 +365,6 @@ async def pay_with_wallet(req: PayWithWalletRequest, request: Request):
     }
     o_res = await db.orders.insert_one(order_doc)
     oid = str(o_res.inserted_id)
-
-    # Deduct from wallet
-    await db.wallet.update_one({"user_id": user["id"]}, {"$inc": {"balance": -req.amount}})
 
     fee = round(req.amount * PLATFORM_FEE_PERCENT / 100, 2)
     merchant_amount = round(req.amount - fee, 2)
