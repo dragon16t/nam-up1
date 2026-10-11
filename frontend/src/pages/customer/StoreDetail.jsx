@@ -301,7 +301,7 @@ export default function StoreDetail() {
       </div>
       {/* Wallet shortfall prompt */}
       {walletPrompt && (
-        <div className="fixed inset-0 z-50 bg-black/50 flex items-end" onClick={() => !paying && setWalletPrompt(null)}>
+        <div className="fixed inset-0 z-[60] bg-black/50 flex items-end" onClick={() => !paying && setWalletPrompt(null)}>
           <div className="bg-white w-full max-w-[480px] mx-auto rounded-t-3xl p-5 pb-8 animate-in slide-in-from-bottom-4"
             onClick={e => e.stopPropagation()}>
             <div className="w-12 h-12 rounded-2xl bg-amber-50 flex items-center justify-center mb-4">

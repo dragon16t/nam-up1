@@ -196,7 +196,7 @@ export default function CustomerWallet() {
 
       {/* Withdraw Modal */}
       {showWithdraw && (
-        <div className="fixed inset-0 z-50 bg-black/50 flex items-end" onClick={() => !processing && setShowWithdraw(false)}>
+        <div className="fixed inset-0 z-[60] bg-black/50 flex items-end" onClick={() => !processing && setShowWithdraw(false)}>
           <div className="bg-white w-full max-w-[480px] mx-auto rounded-t-3xl p-5 pb-8 animate-in slide-in-from-bottom-4"
             onClick={e => e.stopPropagation()}>
             <div className="flex items-center justify-between mb-1">
@@ -225,7 +225,7 @@ export default function CustomerWallet() {
 
       {/* Add Money Modal */}
       {showAddMoney && (
-        <div className="fixed inset-0 z-50 bg-black/50 flex items-end" onClick={() => setShowAddMoney(false)}>
+        <div className="fixed inset-0 z-[60] bg-black/50 flex items-end" onClick={() => setShowAddMoney(false)}>
           <div
             className="bg-white w-full max-w-[480px] mx-auto rounded-t-3xl p-5 pb-8 animate-in slide-in-from-bottom-4"
             onClick={e => e.stopPropagation()}>

@@ -1,0 +1,37 @@
+{
+  "summary": "NAMCOS Phase 2-4 frontend validation complete. All UI deliverables render and behave correctly: Admin Settings fees section exposes NAMCOS Earning (3%) + Referral Reward (10%) fields and persists via 'Save platform' (toast). Admin Stores shows per-store NAMCOS Offer % input ([data-testid=store-discount-<id>]); edit+blur fires 'Discount updated' toast. Admin Subcategories lists seeded shop subcats (Grocery, Jewellery, Electronics, etc.) and can add a new one (verified end-to-end). Customer /customer/store/<Green Mart id> shows orange 'store-discount-badge' = '10% OFF with NAMCOS', 'claim-discount-btn' = 'Claim 10% NAMCOS discount Save ₹20', after click 'discount-applied' shows Bill ₹200 / You save -₹20 / You pay ₹180 and Pay button label becomes 'Pay ₹180' (did NOT trigger real Razorpay). Customer profile shows 'referral-card' with code NAMCAACD3 and Copy + Referred/Earned/Volume stats. /auth OTP step exposes 'auth-referral-input'. CategoryPage /customer/category/shops shows 'subcategory-box' with 12 subcat chips (All + 11 named: bakery-sweets, electronics, fashion-clothing, footwear, furniture, gifts-toys, grocery-supermarket, hardware-tools, jewellery, mobile-accessories, pharmacy-medical, stationery-books); chip click filters list. Merchant /merchant/payments shows the 4 new columns Bill / Customer Discount / NAMCOS Fee / You Get (login +919876543210). Wallet withdrawal: modal opens, all 3 inputs + submit present; backend POST /api/wallet/withdrawals returns 200 and balance debits (380→280), UI shows 'Withdrawal requested — under admin review' + '1 withdrawal(s) under review'. HOWEVER a HIGH-priority overlay bug blocks real-user interaction with the Request Withdrawal button (details below).",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "ui_bugs": [
+      {
+        "component": "CustomerWallet.jsx — Withdraw modal",
+        "issue": "The fixed bottom nav (customer-bottom-nav, z-50) intercepts pointer events on [data-testid='withdraw-submit-btn']. document.elementFromPoint at the submit button center (y≈788 on 390x844) returns <a data-testid='nav-my-listings'>, so a real user tap on 'Request Withdrawal' navigates to /customer/my-listings instead of submitting the withdrawal. The withdraw modal overlay uses z-50 — same as BottomNav — so DOM paint order lets the nav win hit-testing. Submission only works if we bypass with JS .click() / force-click. Repro: open /customer/wallet on 390px, tap Withdraw, fill amount+UPI, tap Request Withdrawal → page jumps to My Listings, modal closes, no POST fires.",
+        "selector": "[data-testid='withdraw-submit-btn']",
+        "priority": "HIGH"
+      }
+    ],
+    "integration_issues": [],
+    "design_issues": [
+      {"screen": "Merchant Payments table on mobile (390px)", "issues": ["4 new columns (Bill / Customer Discount / NAMCOS Fee / You Get) render but table overflows viewport; only Bill is visible without horizontal scroll. Consider stacking numeric breakdown as a sub-line under customer on narrow screens."]}
+    ]
+  },
+  "test_report_links": ["/app/backend/tests/test_namcos_phase1.py (prior)", "/app/test_reports/iteration_2.json"],
+  "action_items": [
+    "FIX overlay/stacking: raise withdraw modal (and Add Money modal) overlay z-index above the BottomNav, e.g. z-[60] on `<div className='fixed inset-0 z-50 bg-black/50 ...'>` in CustomerWallet.jsx (lines ~199 and ~228), OR lower BottomNav to z-40 while modal is open. Same class of bug as iteration_1 StoreDetail CTA overlay — a global audit of fixed bottom overlays vs BottomNav z-index is recommended.",
+    "Optional UX: on narrow screens, collapse the merchant payments breakdown (Bill / Customer Discount / NAMCOS Fee / You Get) into a stacked cell instead of a 4-column horizontal scroll."
+  ],
+  "critical_code_review_comments": [
+    "CustomerWallet.jsx withdraw modal uses z-50 while BottomNav (BottomNav.jsx) is also fixed z-50; because the modal is mounted later in a sibling tree, elementFromPoint at the submit-button center still resolves to the nav link due to the same stacking context — functional click is blocked for real users. Promote modal to z-[60] or wrap in a Dialog/Portal with a higher z-layer.",
+    "AuthPage.jsx: 'auth-referral-input' only shown for new users is good; verify server actually consumes referral_code on verify-otp for existing users too if that is desired.",
+    "AdminSubcategories.jsx: when adding, the just-created subcat gets prepended to Active even without approval; confirm that's intentional (admin-added vs user-suggested path).",
+    "StoreDetail.jsx discount math is purely client-side; backend compute_breakdown must be the source of truth at pay time (confirmed by main-agent note) — ensure UI 'You pay' and server-charged amount match in all edge cases (e.g., discount_percent change between page load and pay)."
+  ],
+  "updated_files": [],
+  "success_rate": {"backend": "n/a (frontend-only run; backend was pre-verified by main agent via curl)", "frontend": "95% — all 10 UI deliverables render and functionally work; 1 HIGH overlay bug prevents real-user withdrawal submission"},
+  "test_credentials": "Admin glowcelesta@gmail.com / Admin@namcos2024. Customer +919000000055 (wallet 380). Merchant +919876543210. OTP returned in /api/auth/send-otp dev response.",
+  "seed_data_creation": "Reused prior Phase1 seed: customer +919000000055 wallet=₹380. Test created+deleted 1 subcategory and 1 wallet_withdrawal row; wallet balance restored to 380 and withdrawal rows cleared post-test. Green Mart discount briefly toggled 10→15→10 (reverted).",
+  "retest_needed": true,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "All Phase 2-4 UI testids verified live: store-discount-<id>, store-discount-badge, claim-discount-btn, discount-applied, referral-card, referral-code, copy-referral-btn, auth-referral-input, withdraw-btn, withdraw-amount-input, withdraw-upi-input, withdraw-submit-btn, subcategory-box, subcat-<slug>, new-subcat-name, add-subcat-btn, approve-subcat-<id>, pending-subcat-<id>. Known Green Mart id = 6acb58571af692553c8827a6 (discount_percent=10). Withdraw submit overlay bug is the only blocker; backend POST /api/wallet/withdrawals works (200, balance decrement verified). Do NOT complete real Razorpay checkout — keys are LIVE.",
+  "rca_of_issue": "Withdraw submit overlay bug — RCA: BottomNav (frontend/src/components/BottomNav.jsx) is `fixed bottom-0 ... z-50`. The withdraw modal overlay in CustomerWallet.jsx line 199 is also `fixed inset-0 z-50`. On mobile viewport (390x844), the modal content panel sits at the bottom and the 'Request Withdrawal' button (h-12) is centered at y≈788, which lies underneath the BottomNav's bounding box (bottom-0 h≈64). Because both have z-50 and the BottomNav is painted later in document order (sibling in CustomerApp layout), it wins hit-testing. Verified by `document.elementFromPoint(cx, cy)` returning the nav-my-listings <a>. Mitigation: in CustomerWallet.jsx change both `fixed inset-0 z-50` to `fixed inset-0 z-[60]` (withdraw + add-money modals), or portal the modal to a container above the nav."
+}
