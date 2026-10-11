@@ -135,7 +135,7 @@ export default function AuthPage() {
           <img
             src={LOGO_URL}
             alt="NAMCOS"
-            className="relative h-28 w-28 object-contain drop-shadow-2xl rounded-full"
+            className="relative h-28 w-28 object-cover rounded-full drop-shadow-2xl bg-white ring-2 ring-white/40"
           />
         </div>
 
