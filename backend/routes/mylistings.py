@@ -15,6 +15,7 @@ except Exception:
     razorpay = None
 
 from database import db
+from earnings import get_rates, compute_breakdown, credit_referral_by_customer_id
 from auth_utils import get_current_user, doc
 
 logger = logging.getLogger(__name__)
@@ -184,9 +185,13 @@ async def razorpay_create_order(body: RzpOrderRequest, request: Request):
     if not client:
         raise HTTPException(500, "Razorpay not configured")
 
+    rates = await get_rates()
+    bd = compute_breakdown(body.amount, store.get("discount_percent", 0), rates["namcos_percent"])
+    net = bd["net_paid"]
+
     receipt = f"nam{int(datetime.now(timezone.utc).timestamp())}"[-40:]
     rz_order = client.order.create({
-        "amount": int(round(body.amount * 100)),
+        "amount": int(round(net * 100)),
         "currency": "INR",
         "receipt": receipt,
         "notes": {"store_id": body.store_id, "customer": user["id"], "note": body.notes or ""},
@@ -202,7 +207,9 @@ async def razorpay_create_order(body: RzpOrderRequest, request: Request):
         "customer_phone": user.get("phone"),
         "store_id": body.store_id, "store_name": store.get("business_name"),
         "merchant_id": store.get("owner_id"),
-        "items": [], "subtotal": body.amount, "final_amount": body.amount,
+        "items": [], "subtotal": bd["gross_amount"],
+        "gross_amount": bd["gross_amount"], "discount_percent": bd["discount_percent"],
+        "discount_amount": bd["discount_amount"], "final_amount": net,
         "payment_status": "pending", "fulfillment_status": "created",
         "notes": body.notes, "order_type": "pay_at_store",
         "razorpay_order_id": rz_order["id"],
@@ -217,6 +224,7 @@ async def razorpay_create_order(body: RzpOrderRequest, request: Request):
         "key_id": RAZORPAY_KEY_ID,
         "order_id": oid, "order_number": order_number,
         "store_name": store.get("business_name"),
+        "breakdown": bd,
         "customer_name": user.get("name"), "customer_phone": user.get("phone"),
     }
 
@@ -248,9 +256,14 @@ async def razorpay_verify(body: RzpVerifyRequest, request: Request):
         raise HTTPException(404, "Order not found")
 
     now = datetime.now(timezone.utc).isoformat()
-    amount = order["final_amount"]
-    fee = round(amount * 2.0 / 100, 2)
-    merchant_amount = round(amount - fee, 2)
+    net = order["final_amount"]
+    rates = await get_rates()
+    bd = compute_breakdown(order.get("gross_amount", net), order.get("discount_percent", 0), rates["namcos_percent"])
+    # keep what was actually charged
+    bd["net_paid"] = net
+    bd["namcos_earning"] = round(net * rates["namcos_percent"] / 100, 2)
+    bd["platform_fee"] = bd["namcos_earning"]
+    bd["merchant_amount"] = round(net - bd["namcos_earning"], 2)
 
     import time, random
     txn_id = f"TXN{int(time.time())}{random.randint(1000,9999)}"
@@ -264,8 +277,7 @@ async def razorpay_verify(body: RzpVerifyRequest, request: Request):
         "merchant_id": order.get("merchant_id"),
         "store_id": order.get("store_id"),
         "store_name": order.get("store_name"),
-        "gross_amount": amount, "discount_amount": 0, "net_paid": amount,
-        "platform_fee": fee, "merchant_amount": merchant_amount,
+        **bd,
         "gateway": "razorpay",
         "gateway_order_id": body.razorpay_order_id,
         "gateway_payment_id": body.razorpay_payment_id,
@@ -285,21 +297,23 @@ async def razorpay_verify(body: RzpVerifyRequest, request: Request):
         "transaction_id": txn_id, "order_id": body.order_id,
         "order_number": order.get("order_number"),
         "store_id": order.get("store_id"), "store_name": order.get("store_name"),
-        "gross_amount": amount, "platform_fee": fee, "net_amount": merchant_amount,
+        "gross_amount": bd["gross_amount"], "platform_fee": bd["namcos_earning"],
+        "net_amount": bd["merchant_amount"],
         "status": "available", "created_at": now,
     })
     await db.notifications.insert_one({
         "user_id": user["id"], "title": "Payment Successful",
-        "message": f"Paid ₹{amount:.0f} to {order.get('store_name')}",
+        "message": f"Paid ₹{net:.0f} to {order.get('store_name')}",
         "type": "payment", "is_read": False, "created_at": now,
     })
     if order.get("merchant_id"):
         await db.notifications.insert_one({
             "user_id": order["merchant_id"], "title": "Payment Received",
-            "message": f"Received ₹{merchant_amount:.0f}",
+            "message": f"Received ₹{bd['merchant_amount']:.0f}",
             "type": "payment", "is_read": False, "created_at": now,
         })
-    return {"success": True, "transaction_id": txn_id, "amount": amount}
+    await credit_referral_by_customer_id(user["id"], net, rates["referral_percent"], txn_id, now)
+    return {"success": True, "transaction_id": txn_id, "amount": net, "breakdown": bd}
 
 
 class RzpTopupRequest(BaseModel):

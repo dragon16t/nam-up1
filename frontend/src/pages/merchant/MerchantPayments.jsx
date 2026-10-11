@@ -74,7 +74,7 @@ export default function MerchantPayments() {
             <table className="w-full min-w-[700px]">
               <thead className="bg-slate-50 border-b border-slate-100">
                 <tr>
-                  {['Transaction ID', 'Order', 'Customer', 'Customer Paid', 'Platform Fee', 'Your Amount', 'Status', 'Date'].map(h => (
+                  {['Transaction ID', 'Customer', 'Bill', 'Customer Discount', 'NAMCOS Fee', 'You Get', 'Status', 'Date'].map(h => (
                     <th key={h} className="text-left text-xs font-semibold text-slate-500 uppercase tracking-wider px-4 py-3">{h}</th>
                   ))}
                 </tr>
@@ -85,13 +85,13 @@ export default function MerchantPayments() {
                     <td className="px-4 py-3.5">
                       <p className="text-xs font-mono text-slate-600">{p.transaction_id}</p>
                     </td>
-                    <td className="px-4 py-3.5 text-xs text-slate-500">{p.order_number || '—'}</td>
                     <td className="px-4 py-3.5">
                       <p className="text-sm text-slate-700">{p.customer_name || '—'}</p>
                       {p.customer_phone && <p className="text-xs text-slate-400 font-mono">{p.customer_phone}</p>}
                     </td>
-                    <td className="px-4 py-3.5 text-sm font-semibold text-slate-800">{formatCurrency(p.net_paid)}</td>
-                    <td className="px-4 py-3.5 text-sm text-red-600">-{formatCurrency(p.platform_fee)}</td>
+                    <td className="px-4 py-3.5 text-sm font-semibold text-slate-800">{formatCurrency(p.gross_amount ?? p.net_paid)}</td>
+                    <td className="px-4 py-3.5 text-sm text-amber-600">{p.discount_amount > 0 ? `-${formatCurrency(p.discount_amount)}` : '—'}{p.discount_percent > 0 ? <span className="text-[10px] text-slate-400 ml-1">({p.discount_percent}%)</span> : null}</td>
+                    <td className="px-4 py-3.5 text-sm text-red-600">-{formatCurrency(p.namcos_earning ?? p.platform_fee)}{p.namcos_percent > 0 ? <span className="text-[10px] text-slate-400 ml-1">({p.namcos_percent}%)</span> : null}</td>
                     <td className="px-4 py-3.5 text-sm font-bold text-[#0F4C3A]">{formatCurrency(p.merchant_amount)}</td>
                     <td className="px-4 py-3.5">
                       <span className={`text-xs px-2.5 py-1 rounded-full border ${getStatusColor(p.status)}`}>

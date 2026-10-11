@@ -7,6 +7,7 @@ from typing import Optional
 import logging, random, time
 
 from database import db
+from earnings import get_rates, compute_breakdown, credit_referral
 from auth_utils import get_current_user, require_roles, doc
 
 logger = logging.getLogger(__name__)
@@ -336,17 +337,21 @@ async def pay_with_wallet(req: PayWithWalletRequest, request: Request):
     if not store:
         raise HTTPException(404, "Store not found")
 
-    # Atomic conditional deduction to avoid race/overdraft
+    rates = await get_rates()
+    bd = compute_breakdown(req.amount, store.get("discount_percent", 0), rates["namcos_percent"])
+    net = bd["net_paid"]
+
+    # Atomic conditional deduction (deduct the discounted net amount)
     updated = await db.wallet.find_one_and_update(
-        {"user_id": user["id"], "balance": {"$gte": req.amount}},
-        {"$inc": {"balance": -req.amount}},
+        {"user_id": user["id"], "balance": {"$gte": net}},
+        {"$inc": {"balance": -net}},
         return_document=ReturnDocument.AFTER,
     )
     if not updated:
         wallet = await db.wallet.find_one({"user_id": user["id"]})
         balance = round((wallet or {}).get("balance", 0.0), 2)
         raise HTTPException(400, {"code": "INSUFFICIENT_FUNDS", "balance": balance,
-                                  "shortfall": round(req.amount - balance, 2)})
+                                  "shortfall": round(net - balance, 2), "net_payable": net})
     new_balance = round(updated["balance"], 2)
 
     now = datetime.now(timezone.utc).isoformat()
@@ -357,8 +362,9 @@ async def pay_with_wallet(req: PayWithWalletRequest, request: Request):
         "customer_phone": user.get("phone"),
         "store_id": req.store_id, "store_name": store.get("business_name"),
         "merchant_id": store.get("owner_id"),
-        "items": [], "subtotal": req.amount, "delivery_fee": 0.0, "tax_amount": 0.0,
-        "gross_amount": req.amount, "discount_amount": 0.0, "final_amount": req.amount,
+        "items": [], "subtotal": bd["gross_amount"], "delivery_fee": 0.0, "tax_amount": 0.0,
+        "gross_amount": bd["gross_amount"], "discount_percent": bd["discount_percent"],
+        "discount_amount": bd["discount_amount"], "final_amount": net,
         "payment_status": "paid", "fulfillment_status": "confirmed",
         "notes": req.notes, "order_type": "pay_at_store", "paid_via": "wallet",
         "created_at": now, "confirmed_at": now,
@@ -366,8 +372,6 @@ async def pay_with_wallet(req: PayWithWalletRequest, request: Request):
     o_res = await db.orders.insert_one(order_doc)
     oid = str(o_res.inserted_id)
 
-    fee = round(req.amount * PLATFORM_FEE_PERCENT / 100, 2)
-    merchant_amount = round(req.amount - fee, 2)
     txn_id = gen_txn_id()
     await db.payments.insert_one({
         "transaction_id": txn_id, "order_id": oid, "order_number": order_number,
@@ -375,8 +379,7 @@ async def pay_with_wallet(req: PayWithWalletRequest, request: Request):
         "customer_phone": user.get("phone"),
         "merchant_id": store.get("owner_id"), "store_id": req.store_id,
         "store_name": store.get("business_name"),
-        "gross_amount": req.amount, "discount_amount": 0, "net_paid": req.amount,
-        "platform_fee": fee, "merchant_amount": merchant_amount,
+        **bd,
         "gateway": "wallet", "payment_method": "wallet", "status": "captured",
         "order_type": "pay_at_store", "captured_at": now, "created_at": now,
     })
@@ -384,28 +387,28 @@ async def pay_with_wallet(req: PayWithWalletRequest, request: Request):
         "merchant_id": store.get("owner_id"), "transaction_id": txn_id, "order_id": oid,
         "order_number": order_number, "store_id": req.store_id,
         "store_name": store.get("business_name"),
-        "gross_amount": req.amount, "platform_fee": fee, "net_amount": merchant_amount,
-        "status": "available", "created_at": now,
+        "gross_amount": bd["gross_amount"], "platform_fee": bd["namcos_earning"],
+        "net_amount": bd["merchant_amount"], "status": "available", "created_at": now,
     })
     await db.wallet_transactions.insert_one({
         "user_id": user["id"], "type": "debit", "source": "pay",
-        "amount": req.amount, "reference_id": txn_id,
+        "amount": net, "reference_id": txn_id,
         "store_name": store.get("business_name"),
         "note": f"Paid to {store.get('business_name')}", "created_at": now,
     })
     await db.notifications.insert_one({
         "user_id": user["id"], "title": "Payment Successful",
-        "message": f"Paid ₹{req.amount:.0f} to {store.get('business_name')} from wallet",
+        "message": f"Paid ₹{net:.0f} to {store.get('business_name')} from wallet",
         "type": "payment", "entity_type": "payment", "entity_id": txn_id,
         "is_read": False, "created_at": now,
     })
     if store.get("owner_id"):
         await db.notifications.insert_one({
             "user_id": store["owner_id"], "title": "Payment Received",
-            "message": f"Received ₹{merchant_amount:.0f} from {user.get('name')}",
+            "message": f"Received ₹{bd['merchant_amount']:.0f} from {user.get('name')}",
             "type": "payment", "entity_type": "payment", "entity_id": txn_id,
             "is_read": False, "created_at": now,
         })
-    new_balance = round(balance - req.amount, 2)
+    await credit_referral(user, net, rates["referral_percent"], txn_id, now)
     return {"success": True, "transaction_id": txn_id, "order_id": oid,
-            "order_number": order_number, "amount": req.amount, "balance": new_balance}
+            "order_number": order_number, "amount": net, "breakdown": bd, "balance": new_balance}

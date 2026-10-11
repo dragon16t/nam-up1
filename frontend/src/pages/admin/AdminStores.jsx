@@ -54,6 +54,14 @@ export default function AdminStores() {
     finally { setActionLoading(false); }
   };
 
+  const saveDiscount = async (storeId, pct) => {
+    try {
+      await api.put(`/admin/edit/store/${storeId}`, { discount_percent: parseFloat(pct) || 0 });
+      toast.success('Discount updated');
+      setStores(prev => prev.map(s => s.id === storeId ? { ...s, discount_percent: parseFloat(pct) || 0 } : s));
+    } catch (e) { toast.error(formatApiError(e)); }
+  };
+
   return (
     <div data-testid={ADMIN.storesTable} className="p-6 max-w-7xl mx-auto animate-fade-in">
       <div className="mb-6">
@@ -112,6 +120,14 @@ export default function AdminStores() {
                         <Star className="w-3 h-3 fill-amber-400 stroke-amber-400" />{store.rating}
                       </span>
                     )}
+                  </div>
+                  <div className="flex items-center gap-2 mt-2.5 pt-2 border-t border-slate-50">
+                    <span className="text-[10px] font-semibold text-slate-400 uppercase tracking-wider">NAMCOS Offer</span>
+                    <input type="number" min="0" max="90" defaultValue={store.discount_percent || 0}
+                      data-testid={`store-discount-${store.id}`}
+                      onBlur={e => { if ((parseFloat(e.target.value)||0) !== (store.discount_percent||0)) saveDiscount(store.id, e.target.value); }}
+                      className="w-16 h-7 px-2 text-xs font-bold text-[#0F4C3A] border border-slate-200 rounded-lg focus:outline-none focus:border-[#0F4C3A]" />
+                    <span className="text-xs text-slate-500">% off for customers</span>
                   </div>
                 </div>
                 <div className="flex gap-2 flex-shrink-0">

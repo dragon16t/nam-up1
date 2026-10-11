@@ -19,6 +19,7 @@ class VerifyOTPRequest(BaseModel):
     phone: str
     otp: str
     name: Optional[str] = None
+    referral_code: Optional[str] = None
 
 class AdminLoginRequest(BaseModel):
     email: str
@@ -60,13 +61,27 @@ async def verify_otp(req: VerifyOTPRequest, response: Response):
     user = await db.users.find_one({"phone": phone})
     is_new = user is None
     if is_new:
+        import secrets
+        referral_code = "NAM" + secrets.token_hex(3).upper()
+        referred_by = None
+        if req.referral_code:
+            ref_user = await db.users.find_one({"referral_code": req.referral_code.strip().upper()})
+            if ref_user:
+                referred_by = str(ref_user["_id"])
         doc = {"phone": phone, "name": req.name or f"User {phone[-4:]}",
                "profile_photo": None, "roles": ["customer"], "is_active": True,
                "locality": None, "city": None, "state": None,
+               "referral_code": referral_code, "referred_by": referred_by,
                "created_at": datetime.now(timezone.utc).isoformat(),
                "last_login": datetime.now(timezone.utc).isoformat()}
         result = await db.users.insert_one(doc)
         user = await db.users.find_one({"_id": result.inserted_id})
+        if referred_by:
+            await db.notifications.insert_one({
+                "user_id": referred_by, "title": "New Referral",
+                "message": f"{doc['name']} joined using your referral code",
+                "type": "referral", "is_read": False,
+                "created_at": datetime.now(timezone.utc).isoformat()})
     else:
         await db.users.update_one({"_id": user["_id"]},
                                   {"$set": {"last_login": datetime.now(timezone.utc).isoformat()}})

@@ -20,6 +20,9 @@ export default function CustomerWallet() {
   const [selectedAmount, setSelectedAmount] = useState(500);
   const [customAmount, setCustomAmount] = useState('');
   const [processing, setProcessing] = useState(false);
+  const [showWithdraw, setShowWithdraw] = useState(false);
+  const [wd, setWd] = useState({ amount: '', upi_id: '' });
+  const [withdrawals, setWithdrawals] = useState([]);
 
   const refresh = () =>
     Promise.allSettled([
@@ -38,7 +41,24 @@ export default function CustomerWallet() {
       if (txRes.status === 'fulfilled') {
         setTopups(txRes.value.data.filter(t => t.type === 'credit'));
       }
-    });
+    }).then(() => api.get('/wallet/withdrawals').then(r => setWithdrawals(r.data)).catch(() => {}));
+
+  const handleWithdraw = async () => {
+    const amt = parseFloat(wd.amount);
+    if (!amt || amt < 100) { toast.error('Minimum withdrawal is ₹100'); return; }
+    if (amt > balance) { toast.error('Amount exceeds wallet balance'); return; }
+    if (!wd.upi_id) { toast.error('Enter your UPI ID'); return; }
+    setProcessing(true);
+    try {
+      const { data } = await api.post('/wallet/withdrawals', { amount: amt, upi_id: wd.upi_id });
+      setBalance(data.balance ?? balance - amt);
+      toast.success('Withdrawal requested — under admin review');
+      setShowWithdraw(false); setWd({ amount: '', upi_id: '' });
+      refresh();
+    } catch (e) {
+      toast.error(e?.response?.data?.detail || 'Withdrawal failed');
+    } finally { setProcessing(false); }
+  };
 
   useEffect(() => { refresh().finally(() => setLoading(false)); }, []);
 
@@ -79,6 +99,17 @@ export default function CustomerWallet() {
           className="mt-5 flex items-center gap-2 bg-white text-[#0F4C3A] font-bold text-sm px-5 py-2.5 rounded-2xl shadow-md hover:bg-slate-50 active:scale-95 transition-all">
           <Plus className="w-4 h-4" /> Add Money
         </button>
+        <button
+          data-testid="withdraw-btn"
+          onClick={() => setShowWithdraw(true)}
+          className="mt-5 ml-2 inline-flex items-center gap-2 bg-white/15 text-white font-bold text-sm px-5 py-2.5 rounded-2xl hover:bg-white/25 active:scale-95 transition-all">
+          <ArrowUpRight className="w-4 h-4" /> Withdraw
+        </button>
+        {withdrawals.filter(w => ['requested','under_review','approved','processing'].includes(w.status)).length > 0 && (
+          <p className="text-[11px] text-white/70 mt-2">
+            {withdrawals.filter(w => ['requested','under_review','approved','processing'].includes(w.status)).length} withdrawal(s) under review
+          </p>
+        )}
       </div>
 
       {/* Stats Row */}
@@ -162,6 +193,35 @@ export default function CustomerWallet() {
           );
         })()}
       </div>
+
+      {/* Withdraw Modal */}
+      {showWithdraw && (
+        <div className="fixed inset-0 z-50 bg-black/50 flex items-end" onClick={() => !processing && setShowWithdraw(false)}>
+          <div className="bg-white w-full max-w-[480px] mx-auto rounded-t-3xl p-5 pb-8 animate-in slide-in-from-bottom-4"
+            onClick={e => e.stopPropagation()}>
+            <div className="flex items-center justify-between mb-1">
+              <h3 className="text-base font-bold text-slate-800">Withdraw to Bank / UPI</h3>
+              <button onClick={() => setShowWithdraw(false)} className="p-1.5 hover:bg-slate-100 rounded-lg"><X className="w-4 h-4 text-slate-400" /></button>
+            </div>
+            <p className="text-xs text-slate-500 mb-4">Available balance: <strong>{formatCurrency(balance)}</strong>. Requests are reviewed by admin before payout.</p>
+            <label className="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-2 block">Amount</label>
+            <div className="relative mb-4">
+              <span className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400 font-bold">₹</span>
+              <input type="number" placeholder="0" value={wd.amount} data-testid="withdraw-amount-input"
+                onChange={e => setWd(w => ({ ...w, amount: e.target.value }))}
+                className="w-full h-12 pl-8 pr-4 bg-slate-50 border border-slate-200 rounded-xl text-lg font-bold text-slate-900 focus:outline-none focus:border-[#0F4C3A]" />
+            </div>
+            <label className="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-2 block">UPI ID</label>
+            <input type="text" placeholder="yourname@upi" value={wd.upi_id} data-testid="withdraw-upi-input"
+              onChange={e => setWd(w => ({ ...w, upi_id: e.target.value }))}
+              className="w-full h-12 px-4 mb-5 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:outline-none focus:border-[#0F4C3A]" />
+            <button onClick={handleWithdraw} disabled={processing} data-testid="withdraw-submit-btn"
+              className="w-full h-12 bg-[#0F4C3A] hover:bg-[#0a3829] disabled:opacity-60 text-white font-bold rounded-2xl transition-colors flex items-center justify-center gap-2">
+              {processing ? <><Loader2 className="w-4 h-4 animate-spin" /> Submitting...</> : `Request Withdrawal`}
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* Add Money Modal */}
       {showAddMoney && (

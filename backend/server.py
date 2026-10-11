@@ -21,6 +21,7 @@ from routes.common import common_router
 from routes.uploads import uploads_router
 from routes.admin_ext import admin_ext_router
 from routes.mylistings import mylistings_router
+from routes.extra import extra_router
 from storage import init_storage
 
 ROOT_DIR = Path(__file__).parent
@@ -31,7 +32,8 @@ app = FastAPI(title="NAMCOS API v1.0", description="NAMCOS Local Commerce Platfo
 
 for router in [auth_router, stores_router, products_router, orders_router,
                payments_router, listings_router, admin_router, admin_ext_router,
-               search_router, common_router, uploads_router, mylistings_router]:
+               search_router, common_router, uploads_router, mylistings_router,
+               extra_router]:
     app.include_router(router, prefix="/api")
 
 app.add_middleware(
@@ -328,10 +330,18 @@ async def seed_data():
     if not await db.settings.find_one({"key": "platform"}):
         await db.settings.insert_one({
             "key": "platform", "max_distance_km": 20,
-            "platform_fee_percent": 2.0, "min_withdrawal_amount": 100,
+            "platform_fee_percent": 2.0, "namcos_earning_percent": 2.0,
+            "referral_percent": 5.0, "min_withdrawal_amount": 100,
             "maintenance_mode": False, "created_at": datetime.now(timezone.utc).isoformat()
         })
         logger.info("Platform settings seeded")
+    else:
+        await db.settings.update_one(
+            {"key": "platform", "namcos_earning_percent": {"$exists": False}},
+            {"$set": {"namcos_earning_percent": 2.0}})
+        await db.settings.update_one(
+            {"key": "platform", "referral_percent": {"$exists": False}},
+            {"$set": {"referral_percent": 5.0}})
 
     # Seed default banner
     if not await db.banners.find_one():
@@ -366,6 +376,23 @@ async def seed_data():
     ]:
         for f in fields:
             await col.update_many({f: "demo"}, {"$set": {f: merch_id}})
+
+    # Seed default shop subcategories (approved) if none exist
+    if not await db.subcategories.find_one({"category": "shops"}):
+        shop_subs = ["Grocery & Supermarket", "Jewellery", "Electronics", "Fashion & Clothing",
+                     "Pharmacy & Medical", "Bakery & Sweets", "Hardware & Tools", "Stationery & Books",
+                     "Mobile & Accessories", "Footwear", "Furniture", "Gifts & Toys"]
+        await db.subcategories.insert_many([
+            {"name": n, "slug": n.lower().replace(" & ", "-").replace(" ", "-"),
+             "category": "shops", "status": "approved", "is_active": True,
+             "created_at": datetime.now(timezone.utc).isoformat()} for n in shop_subs])
+        logger.info("Shop subcategories seeded")
+
+    # Backfill referral codes for users missing one
+    import secrets
+    async for u in db.users.find({"referral_code": {"$exists": False}}):
+        code = "NAM" + secrets.token_hex(3).upper()
+        await db.users.update_one({"_id": u["_id"]}, {"$set": {"referral_code": code}})
 
     # Write test credentials
     creds = Path("/app/memory/test_credentials.md")

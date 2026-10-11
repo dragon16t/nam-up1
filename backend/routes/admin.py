@@ -208,6 +208,24 @@ async def update_withdrawal_status(withdrawal_id: str, request: Request):
                    "processed_at": datetime.now(timezone.utc).isoformat()}
     await db.withdrawals.update_one({"_id": ObjectId(withdrawal_id)}, {"$set": update_data})
     
+    # Wallet-type withdrawal (from user wallet balance): refund on rejection
+    if wd.get("type") == "wallet":
+        if new_status in ("rejected", "reversed"):
+            refund_now = datetime.now(timezone.utc).isoformat()
+            await db.wallet.update_one({"user_id": wd["user_id"]}, {"$inc": {"balance": wd["amount"]}})
+            await db.wallet_transactions.insert_one({
+                "user_id": wd["user_id"], "type": "credit", "source": "refund",
+                "amount": wd["amount"], "reference_id": withdrawal_id,
+                "note": "Withdrawal rejected — refunded to wallet", "created_at": refund_now})
+        await db.notifications.insert_one({
+            "user_id": wd["user_id"], "title": f"Withdrawal {new_status.title()}",
+            "message": f"Your withdrawal of ₹{wd['amount']:.0f} is {new_status}." + (f" {notes}" if notes else ""),
+            "type": "withdrawal", "entity_id": withdrawal_id,
+            "is_read": False, "created_at": datetime.now(timezone.utc).isoformat()})
+        await audit(actor, f"withdrawal_{new_status}", "withdrawal", withdrawal_id,
+                    {"amount": wd["amount"], "user_id": wd["user_id"], "notes": notes})
+        return {"success": True}
+
     # If paid, mark settlements as withdrawn
     if new_status == "paid":
         settlements = await db.settlements.find(
@@ -431,6 +449,6 @@ async def get_platform_settings(request: Request):
 async def update_platform_settings(request: Request):
     actor = await admin_required(request)
     body = await request.json()
-    allowed = {k: body[k] for k in ["max_distance_km","platform_fee_percent","min_withdrawal_amount","maintenance_mode"] if k in body}
+    allowed = {k: body[k] for k in ["max_distance_km","platform_fee_percent","namcos_earning_percent","referral_percent","min_withdrawal_amount","maintenance_mode"] if k in body}
     await db.settings.update_one({"key": "platform"}, {"$set": allowed}, upsert=True)
     return {"success": True}

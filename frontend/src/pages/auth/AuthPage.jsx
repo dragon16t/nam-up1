@@ -83,6 +83,7 @@ export default function AuthPage() {
   const [phone, setPhone] = useState('');
   const [otp, setOtp] = useState('');
   const [name, setName] = useState('');
+  const [referralCode, setReferralCode] = useState('');
   const [isNewUser, setIsNewUser] = useState(false);
   const [loading, setLoading] = useState(false);
   const [devOtp, setDevOtp] = useState('');
@@ -105,7 +106,7 @@ export default function AuthPage() {
     if (!otp || otp.length !== 6) { toast.error('Enter the 6-digit OTP'); return; }
     setLoading(true);
     try {
-      const { data } = await api.post('/auth/verify-otp', { phone, otp, name: name || undefined });
+      const { data } = await api.post('/auth/verify-otp', { phone, otp, name: name || undefined, referral_code: referralCode || undefined });
       login(data.user, data.access_token);
       setIsNewUser(data.is_new_user);
       toast.success(`Welcome${data.is_new_user ? ' to NAMCOS!' : ' back!'}`);
@@ -226,6 +227,13 @@ export default function AuthPage() {
                       className="h-14 rounded-2xl border-slate-200 focus:border-[#0F4C3A] font-semibold px-4" />
                   </div>
                 )}
+                <div>
+                  <label className="text-[11px] font-bold text-slate-400 uppercase tracking-widest mb-2 block">Referral Code <span className="text-slate-300">(optional, new users)</span></label>
+                  <Input type="text" placeholder="e.g. NAM1A2B3C" value={referralCode}
+                    data-testid="auth-referral-input"
+                    onChange={e => setReferralCode(e.target.value.toUpperCase().trim())}
+                    className="h-14 rounded-2xl border-slate-200 focus:border-[#0F4C3A] font-semibold px-4 tracking-wider" />
+                </div>
                 <div>
                   <label className="text-[11px] font-bold text-slate-400 uppercase tracking-widest mb-2 block">6-Digit OTP</label>
                   <Input

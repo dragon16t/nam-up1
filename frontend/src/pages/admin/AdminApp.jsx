@@ -10,6 +10,7 @@ import AdminWithdrawals from './AdminWithdrawals';
 import AdminSettings from './AdminSettings';
 import AdminBanners from './AdminBanners';
 import AdminCategories from './AdminCategories';
+import AdminSubcategories from './AdminSubcategories';
 import AdminInquiries from './AdminInquiries';
 import AdminManualAdd from './AdminManualAdd';
 
@@ -25,6 +26,7 @@ export default function AdminApp() {
         <Route path="withdrawals" element={<AdminWithdrawals />} />
         <Route path="banners" element={<AdminBanners />} />
         <Route path="categories" element={<AdminCategories />} />
+        <Route path="subcategories" element={<AdminSubcategories />} />
         <Route path="inquiries" element={<AdminInquiries />} />
         <Route path="add" element={<AdminManualAdd />} />
         <Route path="settings" element={<AdminSettings />} />

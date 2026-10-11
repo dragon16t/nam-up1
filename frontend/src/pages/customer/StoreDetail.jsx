@@ -30,6 +30,7 @@ export default function StoreDetail() {
   const [success, setSuccess] = useState(null);
   const [walletBalance, setWalletBalance] = useState(0);
   const [walletPrompt, setWalletPrompt] = useState(null);
+  const [claimed, setClaimed] = useState(false);
 
   const accent = '#0F4C3A';
 
@@ -48,6 +49,10 @@ export default function StoreDetail() {
   if (!store) return null;
 
   const supportPhone = store.support_phone || store.category_support_phone;
+  const discountPct = store.discount_percent || 0;
+  const amtNum = parseFloat(amount) || 0;
+  const payable = (claimed && discountPct > 0) ? Math.round((amtNum - amtNum * discountPct / 100) * 100) / 100 : amtNum;
+  const savings = amtNum - payable;
 
   const completeWalletPay = async (amt) => {
     const { data } = await api.post('/payments/pay-with-wallet', {
@@ -180,6 +185,11 @@ export default function StoreDetail() {
           <div className="flex-1 min-w-0">
             <h2 className="text-lg font-bold text-slate-900 truncate">{store.business_name}</h2>
             <p className="text-xs font-semibold mt-0.5" style={{ color: accent }}>{store.business_type || store.category}</p>
+            {discountPct > 0 && (
+              <span data-testid="store-discount-badge" className="inline-flex items-center gap-1 mt-1.5 bg-gradient-to-r from-amber-400 to-orange-500 text-white text-[11px] font-bold px-2.5 py-1 rounded-full shadow-sm">
+                {discountPct}% OFF with NAMCOS
+              </span>
+            )}
           </div>
           {store.rating > 0 && (
             <div className="flex items-center gap-1 flex-shrink-0 bg-amber-50 px-2.5 py-1.5 rounded-xl border border-amber-100">
@@ -220,6 +230,33 @@ export default function StoreDetail() {
               className="w-full h-16 pl-10 pr-4 text-3xl font-bold text-slate-900 bg-slate-50 border border-slate-200 rounded-2xl focus:outline-none focus:border-[#0F4C3A] focus:bg-white transition-all" />
           </div>
         </div>
+        {/* Claim discount */}
+        {discountPct > 0 && amtNum > 0 && (
+          <div className={`mb-4 rounded-2xl border p-4 transition-all ${claimed ? 'border-amber-300 bg-amber-50' : 'border-dashed border-amber-300 bg-amber-50/40'}`}>
+            {!claimed ? (
+              <button data-testid="claim-discount-btn" onClick={() => setClaimed(true)}
+                className="w-full flex items-center justify-between">
+                <span className="text-sm font-bold text-amber-700">🎉 Claim {discountPct}% NAMCOS discount</span>
+                <span className="text-xs font-semibold text-amber-600 bg-white px-2.5 py-1 rounded-full border border-amber-200">Save {formatCurrency(Math.round(amtNum * discountPct / 100))}</span>
+              </button>
+            ) : (
+              <div data-testid="discount-applied">
+                <div className="flex items-center justify-between text-sm">
+                  <span className="text-slate-500">Bill amount</span>
+                  <span className="line-through text-slate-400">{formatCurrency(amtNum)}</span>
+                </div>
+                <div className="flex items-center justify-between text-sm mt-1">
+                  <span className="text-amber-700 font-semibold">You save ({discountPct}%)</span>
+                  <span className="text-amber-700 font-semibold">-{formatCurrency(savings)}</span>
+                </div>
+                <div className="flex items-center justify-between mt-2 pt-2 border-t border-amber-200">
+                  <span className="text-sm font-bold text-slate-800">You pay</span>
+                  <span className="text-lg font-extrabold text-[#0F4C3A]">{formatCurrency(payable)}</span>
+                </div>
+              </div>
+            )}
+          </div>
+        )}
         <div className="mb-4">
           <label className="text-xs font-semibold text-slate-500 uppercase tracking-wider block mb-2">Payment Method</label>
           <div className="grid grid-cols-3 gap-2">
@@ -249,7 +286,7 @@ export default function StoreDetail() {
         <Button data-testid="pay-now-btn" onClick={handlePay} disabled={paying || !amount || parseFloat(amount) < 1}
           className="w-full h-13 rounded-2xl bg-[#0F4C3A] hover:bg-[#0a3829] text-white font-bold text-base py-4 shadow-md disabled:opacity-50">
           {paying ? <><Loader2 className="w-4 h-4 animate-spin mr-2" /> Processing...</>
-            : amount && parseFloat(amount) > 0 ? `Pay ${formatCurrency(parseFloat(amount))}` : 'Enter Amount to Pay'}
+            : amount && parseFloat(amount) > 0 ? `Pay ${formatCurrency(payable)}` : 'Enter Amount to Pay'}
         </Button>
       </div>
 

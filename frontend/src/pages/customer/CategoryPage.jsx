@@ -34,7 +34,15 @@ export default function CategoryPage() {
   const [page, setPage] = useState(1);
   const [total, setTotal] = useState(0);
   const [search, setSearch] = useState('');
+  const [subcats, setSubcats] = useState([]);
+  const [activeSub, setActiveSub] = useState('');
   const [locality] = useState(() => localStorage.getItem('namcos_locality') || '');
+
+  useEffect(() => {
+    api.get('/subcategories', { params: { category: slug } })
+      .then(r => setSubcats(r.data)).catch(() => setSubcats([]));
+    setActiveSub('');
+  }, [slug]);
 
   useEffect(() => {
     // Load category info from API
@@ -50,6 +58,7 @@ export default function CategoryPage() {
     const params = { skip: (page - 1) * LIMIT, limit: LIMIT };
     if (locality) params.locality = locality;
     if (search) params.search = search;
+    if (activeSub) params.subcategory = activeSub;
     params.status = 'published';
     try {
       let endpoint = '/stores';
@@ -65,7 +74,7 @@ export default function CategoryPage() {
       setTotal(data.total || list.length);
     } catch { setItems([]); }
     setLoading(false);
-  }, [slug, page, search, locality]);
+  }, [slug, page, search, locality, activeSub]);
 
   useEffect(() => {
     fetchItems();
@@ -100,6 +109,24 @@ export default function CategoryPage() {
             value={search} onChange={e => { setSearch(e.target.value); setPage(1); }}
             className="w-full h-9 pl-9 pr-3 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:outline-none focus:border-[#0F4C3A] transition-all" />
         </div>
+        {subcats.length > 0 && (
+          <div className="px-4 pb-3">
+            <div data-testid="subcategory-box" className="rounded-2xl border border-slate-200 bg-slate-50/70 p-2.5">
+              <div className="flex flex-wrap gap-2">
+                <button onClick={() => { setActiveSub(''); setPage(1); }}
+                  className={`px-3 py-1.5 rounded-xl text-xs font-semibold border transition-all ${activeSub === '' ? 'bg-[#0F4C3A] text-white border-[#0F4C3A]' : 'bg-white text-slate-600 border-slate-200'}`}>
+                  All
+                </button>
+                {subcats.map(s => (
+                  <button key={s.id} data-testid={`subcat-${s.slug}`} onClick={() => { setActiveSub(s.name); setPage(1); }}
+                    className={`px-3 py-1.5 rounded-xl text-xs font-semibold border transition-all ${activeSub === s.name ? 'bg-[#0F4C3A] text-white border-[#0F4C3A]' : 'bg-white text-slate-600 border-slate-200 hover:border-[#0F4C3A]'}`}>
+                    {s.name}
+                  </button>
+                ))}
+              </div>
+            </div>
+          </div>
+        )}
       </div>
 
       <div className="px-4 pt-3">

@@ -1,15 +1,26 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { User, MapPin, Phone, Settings, Store, Leaf, Wrench, Tag, ChevronRight, LogOut, Bell, HelpCircle } from 'lucide-react';
+import { User, MapPin, Phone, Settings, Store, Leaf, Wrench, Tag, ChevronRight, LogOut, Bell, HelpCircle, Gift, Copy } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { toast } from 'sonner';
 import { useAuth } from '@/contexts/AuthContext';
-import { formatPhone, formatDate } from '@/utils/format';
+import api from '@/utils/api';
+import { formatPhone, formatDate, formatCurrency } from '@/utils/format';
 
 export default function CustomerProfile() {
   const { user, logout } = useAuth();
   const navigate = useNavigate();
   const [showConfirmLogout, setShowConfirmLogout] = useState(false);
+  const [ref, setRef] = useState(null);
+
+  useEffect(() => { api.get('/referrals/me').then(r => setRef(r.data)).catch(() => {}); }, []);
+
+  const copyCode = () => {
+    if (ref?.referral_code) {
+      navigator.clipboard?.writeText(ref.referral_code);
+      toast.success('Referral code copied!');
+    }
+  };
 
   const handleLogout = async () => {
     await logout();
@@ -49,6 +60,37 @@ export default function CustomerProfile() {
         </div>
         <p className="text-xs text-white/50 mt-3">Member since {formatDate(user?.created_at)}</p>
       </div>
+
+      {/* Referral Card */}
+      <section className="px-4 pt-5">
+        <div data-testid="referral-card" className="rounded-2xl bg-gradient-to-br from-[#0F4C3A] to-[#1a6b55] p-5 text-white shadow-md">
+          <div className="flex items-center gap-2 mb-3">
+            <Gift className="w-4 h-4 text-amber-300" />
+            <h2 className="text-sm font-bold">Refer & Earn</h2>
+          </div>
+          <p className="text-xs text-white/70 mb-3">Share your code. Earn a reward every time a friend pays through NAMCOS.</p>
+          <div className="flex items-center gap-2 bg-white/10 rounded-xl p-3 mb-4">
+            <span data-testid="referral-code" className="flex-1 text-lg font-black tracking-widest">{ref?.referral_code || '—'}</span>
+            <button onClick={copyCode} data-testid="copy-referral-btn" className="flex items-center gap-1 bg-white text-[#0F4C3A] text-xs font-bold px-3 py-1.5 rounded-lg active:scale-95 transition">
+              <Copy className="w-3.5 h-3.5" /> Copy
+            </button>
+          </div>
+          <div className="grid grid-cols-3 gap-2 text-center">
+            <div className="bg-white/10 rounded-xl py-2.5">
+              <p className="text-lg font-bold">{ref?.referred_count ?? 0}</p>
+              <p className="text-[10px] text-white/60">Referred</p>
+            </div>
+            <div className="bg-white/10 rounded-xl py-2.5">
+              <p className="text-lg font-bold text-amber-300">{formatCurrency(ref?.total_earnings ?? 0)}</p>
+              <p className="text-[10px] text-white/60">Earned</p>
+            </div>
+            <div className="bg-white/10 rounded-xl py-2.5">
+              <p className="text-lg font-bold">{formatCurrency(ref?.volume ?? 0)}</p>
+              <p className="text-[10px] text-white/60">Volume</p>
+            </div>
+          </div>
+        </div>
+      </section>
 
       {/* Start Selling */}
       <section className="px-4 pt-5">

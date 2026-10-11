@@ -7,7 +7,7 @@ import api, { formatApiError } from '@/utils/api';
 import { ADMIN } from '@/constants/testIds';
 
 export default function AdminSettings() {
-  const [platform, setPlatform] = useState({ platform_fee_percent: 2, min_withdrawal_amount: 100, maintenance_mode: false });
+  const [platform, setPlatform] = useState({ platform_fee_percent: 2, namcos_earning_percent: 2, referral_percent: 5, min_withdrawal_amount: 100, maintenance_mode: false });
   const [contact, setContact] = useState({ support_email: '', support_phone: '', whatsapp: '', business_hours: '', company_address: '' });
   const [pw, setPw] = useState({ current_password: '', new_password: '', confirm_password: '' });
   const [savingPlat, setSavingPlat] = useState(false);
@@ -56,6 +56,14 @@ export default function AdminSettings() {
 
       {/* Fees */}
       <Section title="Fees & Withdrawal" icon={Percent}>
+        <div className="grid grid-cols-2 gap-3">
+          <Field label="NAMCOS Earning (%)" type="number" step="0.1"
+            value={platform.namcos_earning_percent}
+            onChange={v => setPlatform(p => ({ ...p, namcos_earning_percent: parseFloat(v) || 0 }))} />
+          <Field label="Referral Reward (%)" type="number" step="0.1"
+            value={platform.referral_percent}
+            onChange={v => setPlatform(p => ({ ...p, referral_percent: parseFloat(v) || 0 }))} />
+        </div>
         <div className="grid grid-cols-2 gap-3">
           <Field label="Platform Fee (%)" type="number" step="0.1"
             value={platform.platform_fee_percent}

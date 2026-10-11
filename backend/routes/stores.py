@@ -35,6 +35,7 @@ class StoreSubmitRequest(BaseModel):
     pickup_available: bool = True
     service_radius: float = 5.0
     categories: List[str] = []
+    subcategory: Optional[str] = None
     bank_account: Optional[str] = None
     ifsc: Optional[str] = None
     account_holder: Optional[str] = None
@@ -43,7 +44,8 @@ class StoreSubmitRequest(BaseModel):
 
 @stores_router.get("/stores")
 async def list_stores(locality: Optional[str] = None, city: Optional[str] = None,
-                      category: Optional[str] = None, search: Optional[str] = None,
+                      category: Optional[str] = None, subcategory: Optional[str] = None,
+                      search: Optional[str] = None,
                       skip: int = 0, limit: int = 20):
     query = {"status": "published"}
     if locality:
@@ -52,6 +54,8 @@ async def list_stores(locality: Optional[str] = None, city: Optional[str] = None
         query["city"] = {"$regex": city, "$options": "i"}
     if category:
         query["categories"] = {"$in": [category]}
+    if subcategory:
+        query["subcategory"] = subcategory
     if search:
         query["$or"] = [{"business_name": {"$regex": search, "$options": "i"}},
                         {"description": {"$regex": search, "$options": "i"}}]

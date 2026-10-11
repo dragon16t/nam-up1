@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { NavLink, useNavigate } from 'react-router-dom';
 import {
   LayoutDashboard, Users, Store, CreditCard, FileText,
-  Banknote, Settings, Menu, X, LogOut, Bell, Grid3X3, Image, Phone, Plus
+  Banknote, Settings, Menu, X, LogOut, Bell, Grid3X3, Image, Phone, Plus, Layers
 } from 'lucide-react';
 import { useAuth } from '@/contexts/AuthContext';
 import { ADMIN } from '@/constants/testIds';
@@ -21,6 +21,7 @@ const NAV_GROUPS = [
       { to: '/admin/stores', label: 'Stores', icon: Store },
       { to: '/admin/listings', label: 'Listings', icon: FileText },
       { to: '/admin/categories', label: 'Categories', icon: Grid3X3 },
+      { to: '/admin/subcategories', label: 'Subcategories', icon: Layers },
       { to: '/admin/add', label: 'Add Listing', icon: Plus },
       { to: '/admin/inquiries', label: 'Inquiries', icon: Phone },
     ]
