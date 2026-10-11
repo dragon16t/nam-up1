@@ -10,7 +10,7 @@ import { PageLoader } from '@/components/shared/LoadingSpinner';
 import api, { formatApiError } from '@/utils/api';
 import { formatCurrency, formatDateTime } from '@/utils/format';
 import DetailImageGallery from '@/components/shared/DetailImageGallery';
-import { payAtStoreWithRazorpay } from '@/utils/razorpay';
+import { payAtStoreWithRazorpay, topupWalletWithRazorpay } from '@/utils/razorpay';
 
 const PAYMENT_METHODS = [
   { value: 'upi', label: 'UPI / QR', icon: Smartphone },
@@ -28,14 +28,20 @@ export default function StoreDetail() {
   const [payMethod, setPayMethod] = useState('upi');
   const [paying, setPaying] = useState(false);
   const [success, setSuccess] = useState(null);
+  const [walletBalance, setWalletBalance] = useState(0);
+  const [walletPrompt, setWalletPrompt] = useState(null);
 
   const accent = '#0F4C3A';
+
+  const loadWallet = () =>
+    api.get('/wallet/balance').then(r => setWalletBalance(r.data.balance ?? 0)).catch(() => {});
 
   useEffect(() => {
     api.get(`/stores/${storeId}`)
       .then(r => setStore(r.data))
       .catch(() => { toast.error('Store not found'); navigate('/customer'); })
       .finally(() => setLoading(false));
+    loadWallet();
   }, [storeId]);
 
   if (loading) return <PageLoader />;
@@ -43,32 +49,71 @@ export default function StoreDetail() {
 
   const supportPhone = store.support_phone || store.category_support_phone;
 
+  const completeWalletPay = async (amt) => {
+    const { data } = await api.post('/payments/pay-with-wallet', {
+      store_id: storeId, amount: amt, notes: notes || `Pay at ${store.business_name}`,
+    });
+    setWalletBalance(data.balance ?? 0);
+    setSuccess({
+      transaction_id: data.transaction_id, amount: data.amount,
+      paid_at: new Date().toISOString(), store_name: store.business_name,
+      order_id: data.order_id,
+    });
+    toast.success('Paid from wallet!');
+  };
+
+  const handleWalletPay = async (amt) => {
+    try {
+      await completeWalletPay(amt);
+    } catch (e) {
+      const detail = e?.response?.data?.detail || '';
+      if (typeof detail === 'string' && detail.startsWith('INSUFFICIENT|')) {
+        const [, bal, shortfall] = detail.split('|');
+        setWalletPrompt({ balance: parseFloat(bal), shortfall: parseFloat(shortfall), amount: amt });
+      } else {
+        toast.error(formatApiError(e));
+      }
+    }
+  };
+
+  const handleAddAndPay = async () => {
+    const { shortfall, amount: amt } = walletPrompt;
+    setPaying(true);
+    try {
+      await topupWalletWithRazorpay({ amount: Math.ceil(shortfall) });
+      await loadWallet();
+      setWalletPrompt(null);
+      await completeWalletPay(amt);
+    } catch (e) {
+      const msg = e?.message || formatApiError(e);
+      if (msg.toLowerCase().includes('cancel')) toast.info('Top-up cancelled');
+      else toast.error(msg);
+    } finally { setPaying(false); }
+  };
+
   const handlePay = async () => {
     const amt = parseFloat(amount);
     if (!amt || amt < 1) { toast.error('Enter a valid amount'); return; }
     if (amt > 100000) { toast.error('Amount cannot exceed ₹1,00,000'); return; }
     setPaying(true);
     try {
-      // Live Razorpay flow first
-      const result = await payAtStoreWithRazorpay({
-        storeId,
-        amount: amt,
-        notes: notes || `Pay at ${store.business_name}`,
-      });
-      setSuccess({
-        transaction_id: result.transaction_id,
-        amount: result.amount,
-        paid_at: new Date().toISOString(),
-        store_name: store.business_name,
-      });
-      toast.success('Payment successful!');
+      if (payMethod === 'wallet') {
+        await handleWalletPay(amt);
+      } else {
+        const result = await payAtStoreWithRazorpay({
+          storeId, amount: amt, notes: notes || `Pay at ${store.business_name}`,
+        });
+        setSuccess({
+          transaction_id: result.transaction_id, amount: result.amount,
+          paid_at: new Date().toISOString(), store_name: store.business_name,
+          order_id: result.order?.order_id,
+        });
+        toast.success('Payment successful!');
+      }
     } catch (e) {
       const msg = e?.message || formatApiError(e);
-      if (msg && msg.toLowerCase().includes('cancel')) {
-        toast.info('Payment cancelled');
-      } else {
-        toast.error(msg);
-      }
+      if (msg && msg.toLowerCase().includes('cancel')) toast.info('Payment cancelled');
+      else toast.error(msg);
     } finally {
       setPaying(false);
     }
@@ -95,6 +140,11 @@ export default function StoreDetail() {
             <div className="px-5 pb-5 space-y-2">
               <Button onClick={() => { setSuccess(null); setAmount(''); setNotes(''); }}
                 className="w-full h-11 rounded-2xl bg-[#0F4C3A] hover:bg-[#0a3829] text-white">Pay Again</Button>
+              {success.order_id && (
+                <button onClick={() => navigate(`/customer/orders/${success.order_id}`)}
+                  data-testid="view-order-btn"
+                  className="w-full text-sm font-semibold text-[#0F4C3A] hover:text-[#0a3829] py-2 transition-colors">View Order Details</button>
+              )}
               <button onClick={() => navigate('/customer/orders')}
                 className="w-full text-sm text-slate-500 hover:text-[#0F4C3A] py-2 transition-colors">View All Transactions</button>
             </div>
@@ -181,6 +231,9 @@ export default function StoreDetail() {
                 }`}>
                 <Icon className="w-5 h-5" />
                 <span className="text-xs font-medium">{label}</span>
+                {value === 'wallet' && (
+                  <span className="text-[9px] text-slate-400">{formatCurrency(walletBalance)}</span>
+                )}
               </button>
             ))}
           </div>
@@ -212,6 +265,33 @@ export default function StoreDetail() {
           </a>
         </div>
       </div>
+      {/* Wallet shortfall prompt */}
+      {walletPrompt && (
+        <div className="fixed inset-0 z-50 bg-black/50 flex items-end" onClick={() => !paying && setWalletPrompt(null)}>
+          <div className="bg-white w-full max-w-[480px] mx-auto rounded-t-3xl p-5 pb-8 animate-in slide-in-from-bottom-4"
+            onClick={e => e.stopPropagation()}>
+            <div className="w-12 h-12 rounded-2xl bg-amber-50 flex items-center justify-center mb-4">
+              <Wallet className="w-6 h-6 text-amber-500" />
+            </div>
+            <h3 className="text-lg font-bold text-slate-900">Not enough wallet balance</h3>
+            <p className="text-sm text-slate-500 mt-1">
+              Add the remaining amount to complete this payment from your wallet.
+            </p>
+            <div className="bg-slate-50 rounded-2xl p-4 mt-4 space-y-2 text-sm">
+              <div className="flex justify-between"><span className="text-slate-500">Bill amount</span><span className="font-semibold text-slate-800">{formatCurrency(walletPrompt.amount)}</span></div>
+              <div className="flex justify-between"><span className="text-slate-500">Wallet balance</span><span className="font-semibold text-slate-800">{formatCurrency(walletPrompt.balance)}</span></div>
+              <div className="flex justify-between border-t border-slate-200 pt-2"><span className="text-slate-500">To add</span><span className="font-bold text-[#0F4C3A]">{formatCurrency(Math.ceil(walletPrompt.shortfall))}</span></div>
+            </div>
+            <Button data-testid="wallet-add-and-pay-btn" onClick={handleAddAndPay} disabled={paying}
+              className="w-full h-12 mt-5 rounded-2xl bg-[#0F4C3A] hover:bg-[#0a3829] text-white font-bold">
+              {paying ? <><Loader2 className="w-4 h-4 animate-spin mr-2" /> Processing...</>
+                : `Add ${formatCurrency(Math.ceil(walletPrompt.shortfall))} & Pay`}
+            </Button>
+            <button onClick={() => setWalletPrompt(null)} disabled={paying}
+              className="w-full text-sm text-slate-500 py-3 mt-1">Cancel</button>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

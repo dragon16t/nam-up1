@@ -5,6 +5,7 @@ import CustomerHome from './CustomerHome';
 import CustomerExplore from './CustomerExplore';
 import StoreDetail from './StoreDetail';
 import CustomerOrders from './CustomerOrders';
+import OrderDetail from './OrderDetail';
 import CustomerWallet from './CustomerWallet';
 import CustomerProfile from './CustomerProfile';
 import Cart from './Cart';
@@ -25,6 +26,7 @@ export default function CustomerApp() {
         <Route path="explore" element={<CustomerExplore />} />
         <Route path="store/:storeId" element={<StoreDetail />} />
         <Route path="orders" element={<CustomerOrders />} />
+        <Route path="orders/:orderId" element={<OrderDetail />} />
         <Route path="my-listings" element={<MyListings />} />
         <Route path="wallet" element={<CustomerWallet />} />
         <Route path="profile" element={<CustomerProfile />} />

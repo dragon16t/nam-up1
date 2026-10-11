@@ -19,8 +19,17 @@ async def get_public_banners():
 @common_router.get("/wallet/balance")
 async def get_wallet_balance(request: Request):
     user = await get_current_user(request, db)
-    return {"balance": 0.0, "pending_balance": 0.0, "currency": "INR",
-            "message": "Wallet top-up coming soon"}
+    wallet = await db.wallet.find_one({"user_id": user["id"]})
+    bal = (wallet or {}).get("balance", 0.0)
+    return {"balance": round(bal, 2), "pending_balance": 0.0, "currency": "INR",
+            "total_topped_up": round((wallet or {}).get("total_topped_up", 0.0), 2)}
+
+@common_router.get("/wallet/transactions")
+async def get_wallet_transactions(request: Request, limit: int = 50):
+    user = await get_current_user(request, db)
+    txns = await db.wallet_transactions.find(
+        {"user_id": user["id"]}).sort("created_at", -1).limit(limit).to_list(limit)
+    return [doc(t) for t in txns]
 
 # ─── CATEGORIES ───────────────────────────────────────────
 

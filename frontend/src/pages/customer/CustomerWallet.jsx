@@ -11,6 +11,7 @@ const ADD_AMOUNTS = [100, 200, 500, 1000, 2000];
 
 export default function CustomerWallet() {
   const [payments, setPayments] = useState([]);
+  const [topups, setTopups] = useState([]);
   const [loading, setLoading] = useState(true);
   const [balance, setBalance] = useState(0);
   const [totalSpent, setTotalSpent] = useState(0);
@@ -24,7 +25,8 @@ export default function CustomerWallet() {
     Promise.allSettled([
       api.get('/wallet/balance'),
       api.get('/payments/my'),
-    ]).then(([balRes, payRes]) => {
+      api.get('/wallet/transactions'),
+    ]).then(([balRes, payRes, txRes]) => {
       if (balRes.status === 'fulfilled') setBalance(balRes.value.data.balance ?? 0);
       if (payRes.status === 'fulfilled') {
         const data = payRes.value.data;
@@ -32,6 +34,9 @@ export default function CustomerWallet() {
         const captured = data.filter(p => p.status === 'captured');
         setTotalSpent(captured.reduce((s, p) => s + (p.net_paid || 0), 0));
         setTotalSaved(captured.reduce((s, p) => s + (p.discount_amount || 0), 0));
+      }
+      if (txRes.status === 'fulfilled') {
+        setTopups(txRes.value.data.filter(t => t.type === 'credit'));
       }
     });
 
@@ -96,41 +101,66 @@ export default function CustomerWallet() {
       {/* Transaction History */}
       <div className="px-4">
         <h2 className="text-sm font-bold text-slate-800 mb-3 uppercase tracking-wider">Transaction History</h2>
-        {loading ? <SkeletonList count={4} /> :
-          payments.length === 0 ? (
-            <EmptyState type="orders" title="No transactions yet" description="Your payment history will appear here" />
-          ) : (
+        {loading ? <SkeletonList count={4} /> : (() => {
+          const history = [
+            ...payments.map(p => ({ kind: 'pay', key: 'p' + p.id, date: p.created_at, ...p })),
+            ...topups.map(t => ({ kind: 'topup', key: 't' + t.id, date: t.created_at, ...t })),
+          ].sort((a, b) => new Date(b.date) - new Date(a.date));
+          if (history.length === 0) {
+            return <EmptyState type="orders" title="No transactions yet" description="Your payment history will appear here" />;
+          }
+          return (
             <div className="space-y-3">
-              {payments.map(p => (
-                <div key={p.id} data-testid={`txn-${p.id}`} className="bg-white rounded-2xl border border-slate-100 shadow-sm p-4">
+              {history.map(item => item.kind === 'topup' ? (
+                <div key={item.key} data-testid={`txn-${item.key}`} className="bg-white rounded-2xl border border-slate-100 shadow-sm p-4">
                   <div className="flex items-start justify-between">
                     <div className="flex items-center gap-3">
-                      <div className={`w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0 ${
-                        p.status === 'captured' ? 'bg-green-50' : 'bg-red-50'}`}>
-                        <ArrowDownLeft className={`w-4 h-4 ${p.status === 'captured' ? 'text-green-600' : 'text-red-500'}`} />
+                      <div className="w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0 bg-emerald-50">
+                        <ArrowUpRight className="w-4 h-4 text-emerald-600" />
                       </div>
                       <div>
-                        <p className="text-sm font-semibold text-slate-800">{p.store_name || 'Payment'}</p>
-                        <p className="text-[10px] text-slate-400 font-mono">{p.transaction_id}</p>
+                        <p className="text-sm font-semibold text-slate-800">Money Added</p>
+                        <p className="text-[10px] text-slate-400">{item.note || 'Wallet top-up'}</p>
                       </div>
                     </div>
                     <div className="text-right">
-                      <p className={`text-sm font-bold ${p.status === 'captured' ? 'text-slate-800' : 'text-red-500'}`}>
-                        {formatCurrency(p.net_paid)}
+                      <p className="text-sm font-bold text-emerald-600">+{formatCurrency(item.amount)}</p>
+                      <span className="text-[10px] px-2 py-0.5 rounded-full border bg-green-50 text-green-700 border-green-200">Credited</span>
+                    </div>
+                  </div>
+                  <p className="text-xs text-slate-400 mt-1.5">{formatDate(item.date)}</p>
+                </div>
+              ) : (
+                <div key={item.key} data-testid={`txn-${item.id}`} className="bg-white rounded-2xl border border-slate-100 shadow-sm p-4">
+                  <div className="flex items-start justify-between">
+                    <div className="flex items-center gap-3">
+                      <div className={`w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0 ${
+                        item.status === 'captured' ? 'bg-slate-100' : 'bg-red-50'}`}>
+                        <ArrowDownLeft className={`w-4 h-4 ${item.status === 'captured' ? 'text-slate-600' : 'text-red-500'}`} />
+                      </div>
+                      <div>
+                        <p className="text-sm font-semibold text-slate-800">{item.store_name || 'Payment'}</p>
+                        <p className="text-[10px] text-slate-400 font-mono">{item.transaction_id}{item.payment_method === 'wallet' ? ' · Wallet' : ''}</p>
+                      </div>
+                    </div>
+                    <div className="text-right">
+                      <p className={`text-sm font-bold ${item.status === 'captured' ? 'text-slate-800' : 'text-red-500'}`}>
+                        -{formatCurrency(item.net_paid)}
                       </p>
-                      <span className={`text-[10px] px-2 py-0.5 rounded-full border ${getStatusColor(p.status)}`}>
-                        {getStatusLabel(p.status)}
+                      <span className={`text-[10px] px-2 py-0.5 rounded-full border ${getStatusColor(item.status)}`}>
+                        {getStatusLabel(item.status)}
                       </span>
                     </div>
                   </div>
-                  {p.discount_amount > 0 && (
-                    <p className="text-xs text-green-600 mt-2">Saved {formatCurrency(p.discount_amount)} with NAMCOS</p>
+                  {item.discount_amount > 0 && (
+                    <p className="text-xs text-green-600 mt-2">Saved {formatCurrency(item.discount_amount)} with NAMCOS</p>
                   )}
-                  <p className="text-xs text-slate-400 mt-1.5">{formatDate(p.created_at)}</p>
+                  <p className="text-xs text-slate-400 mt-1.5">{formatDate(item.date)}</p>
                 </div>
               ))}
             </div>
-          )}
+          );
+        })()}
       </div>
 
       {/* Add Money Modal */}

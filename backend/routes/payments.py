@@ -54,6 +54,8 @@ async def initiate_payment(req: InitiatePaymentRequest, request: Request):
         "order_id": req.order_id,
         "order_number": order.get("order_number"),
         "customer_id": user["id"],
+        "customer_name": user.get("name"),
+        "customer_phone": user.get("phone"),
         "merchant_id": order.get("merchant_id"),
         "store_id": order.get("store_id"),
         "store_name": order.get("store_name"),
@@ -253,6 +255,7 @@ async def pay_at_store(req: PayAtStoreRequest, request: Request):
         "store_id": req.store_id,
         "store_name": store.get("business_name"),
         "merchant_id": store.get("owner_id"),
+        "customer_phone": user.get("phone"),
         "items": [],
         "subtotal": req.amount,
         "delivery_fee": 0.0,
@@ -275,6 +278,8 @@ async def pay_at_store(req: PayAtStoreRequest, request: Request):
         "order_id": oid,
         "order_number": order_number,
         "customer_id": user["id"],
+        "customer_name": user.get("name"),
+        "customer_phone": user.get("phone"),
         "merchant_id": store.get("owner_id"),
         "store_id": req.store_id,
         "store_name": store.get("business_name"),
@@ -310,3 +315,92 @@ async def get_merchant_withdrawals(request: Request):
     user = await get_current_user(request, db)
     withdrawals = await db.withdrawals.find({"merchant_id": user["id"]}).sort("created_at", -1).to_list(100)
     return [doc(w) for w in withdrawals]
+
+
+class PayWithWalletRequest(BaseModel):
+    store_id: str
+    amount: float
+    notes: Optional[str] = None
+
+@payments_router.post("/payments/pay-with-wallet")
+async def pay_with_wallet(req: PayWithWalletRequest, request: Request):
+    """Pay a store bill directly from NAMCOS wallet balance."""
+    user = await get_current_user(request, db)
+    if req.amount < 1:
+        raise HTTPException(400, "Minimum payment is ₹1")
+    try:
+        store = await db.stores.find_one({"_id": ObjectId(req.store_id)})
+    except Exception:
+        raise HTTPException(400, "Invalid store ID")
+    if not store:
+        raise HTTPException(404, "Store not found")
+
+    wallet = await db.wallet.find_one({"user_id": user["id"]})
+    balance = (wallet or {}).get("balance", 0.0)
+    if balance < req.amount:
+        shortfall = round(req.amount - balance, 2)
+        raise HTTPException(400, f"INSUFFICIENT|{balance}|{shortfall}")
+
+    now = datetime.now(timezone.utc).isoformat()
+    order_number = f"ORD{int(time.time())}{random.randint(100, 999)}"
+    order_doc = {
+        "order_number": order_number,
+        "customer_id": user["id"], "customer_name": user.get("name"),
+        "customer_phone": user.get("phone"),
+        "store_id": req.store_id, "store_name": store.get("business_name"),
+        "merchant_id": store.get("owner_id"),
+        "items": [], "subtotal": req.amount, "delivery_fee": 0.0, "tax_amount": 0.0,
+        "gross_amount": req.amount, "discount_amount": 0.0, "final_amount": req.amount,
+        "payment_status": "paid", "fulfillment_status": "confirmed",
+        "notes": req.notes, "order_type": "pay_at_store", "paid_via": "wallet",
+        "created_at": now, "confirmed_at": now,
+    }
+    o_res = await db.orders.insert_one(order_doc)
+    oid = str(o_res.inserted_id)
+
+    # Deduct from wallet
+    await db.wallet.update_one({"user_id": user["id"]}, {"$inc": {"balance": -req.amount}})
+
+    fee = round(req.amount * PLATFORM_FEE_PERCENT / 100, 2)
+    merchant_amount = round(req.amount - fee, 2)
+    txn_id = gen_txn_id()
+    await db.payments.insert_one({
+        "transaction_id": txn_id, "order_id": oid, "order_number": order_number,
+        "customer_id": user["id"], "customer_name": user.get("name"),
+        "customer_phone": user.get("phone"),
+        "merchant_id": store.get("owner_id"), "store_id": req.store_id,
+        "store_name": store.get("business_name"),
+        "gross_amount": req.amount, "discount_amount": 0, "net_paid": req.amount,
+        "platform_fee": fee, "merchant_amount": merchant_amount,
+        "gateway": "wallet", "payment_method": "wallet", "status": "captured",
+        "order_type": "pay_at_store", "captured_at": now, "created_at": now,
+    })
+    await db.settlements.insert_one({
+        "merchant_id": store.get("owner_id"), "transaction_id": txn_id, "order_id": oid,
+        "order_number": order_number, "store_id": req.store_id,
+        "store_name": store.get("business_name"),
+        "gross_amount": req.amount, "platform_fee": fee, "net_amount": merchant_amount,
+        "status": "available", "created_at": now,
+    })
+    await db.wallet_transactions.insert_one({
+        "user_id": user["id"], "type": "debit", "source": "pay",
+        "amount": req.amount, "reference_id": txn_id,
+        "store_name": store.get("business_name"),
+        "note": f"Paid to {store.get('business_name')}", "created_at": now,
+    })
+    await db.notifications.insert_one({
+        "user_id": user["id"], "title": "Payment Successful",
+        "message": f"Paid ₹{req.amount:.0f} to {store.get('business_name')} from wallet",
+        "type": "payment", "entity_type": "payment", "entity_id": txn_id,
+        "is_read": False, "created_at": now,
+    })
+    if store.get("owner_id"):
+        await db.notifications.insert_one({
+            "user_id": store["owner_id"], "title": "Payment Received",
+            "message": f"Received ₹{merchant_amount:.0f} from {user.get('name')}",
+            "type": "payment", "entity_type": "payment", "entity_id": txn_id,
+            "is_read": False, "created_at": now,
+        })
+    new_balance = round(balance - req.amount, 2)
+    return {"success": True, "transaction_id": txn_id, "order_id": oid,
+            "order_number": order_number, "amount": req.amount, "balance": new_balance}
